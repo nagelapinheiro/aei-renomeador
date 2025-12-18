@@ -1,0 +1,672 @@
+import React, { useState, useEffect } from 'react';
+import { FileText, Download, Trash2, AlertCircle, Upload, FileDown, LogOut, Mail, Lock, User } from 'lucide-react';
+
+// IMPORTANTE: Substitua pelo seu Client ID do Google Cloud Console
+const GOOGLE_CLIENT_ID = '371113880716-uc19o5c33ptf0jr3fva816lcjfv0kqre.apps.googleusercontent.com';
+const ALLOWED_DOMAIN = '@arautosdoevangelho.org.br';
+
+export default function AEIFileRenamer() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [loginData, setLoginData] = useState({
+    email: '',
+    password: ''
+  });
+  const [loginError, setLoginError] = useState('');
+  const [googleLoaded, setGoogleLoaded] = useState(false);
+
+  const [uploadedFile, setUploadedFile] = useState(null);
+  const [formData, setFormData] = useState({
+    dataCompra: '',
+    fornecedor: '',
+    tipoDoc: 'NF',
+    numeroDoc: '',
+    valorDoc: '',
+    formaPagamento: 'Banco',
+    numeroCartao: '',
+    valorPago: '',
+    parcela: '',
+    totalParcelas: ''
+  });
+
+  const tiposDocumento = [
+    { value: 'NF', label: 'Nota Fiscal (NF)' },
+    { value: 'NFs', label: 'Nota Fiscal de Serviço (NFs)' },
+    { value: 'CF', label: 'Cupom Fiscal (CF)' },
+    { value: 'Fat', label: 'Fatura (Fat)' },
+    { value: 'Doc', label: 'Boleto (Doc)' },
+    { value: 'Mat', label: 'Matrícula (Mat)' },
+    { value: 'Invoice', label: 'Invoice' }
+  ];
+
+  const formasPagamento = [
+    { value: 'Banco', label: 'Banco' },
+    { value: 'CCredito', label: 'Cartão de Crédito' },
+    { value: '$', label: 'Dinheiro' }
+  ];
+
+  // Inicializar Google Sign-In
+  useEffect(() => {
+    const initializeGoogleSignIn = () => {
+      if (window.google) {
+        window.google.accounts.id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          callback: handleGoogleResponse,
+          auto_select: false,
+        });
+        setGoogleLoaded(true);
+      }
+    };
+
+    // Tentar inicializar imediatamente
+    if (window.google) {
+      initializeGoogleSignIn();
+    } else {
+      // Se não estiver carregado, esperar
+      const checkGoogle = setInterval(() => {
+        if (window.google) {
+          initializeGoogleSignIn();
+          clearInterval(checkGoogle);
+        }
+      }, 100);
+
+      return () => clearInterval(checkGoogle);
+    }
+  }, []);
+
+  // Renderizar botão do Google quando estiver pronto
+  useEffect(() => {
+    if (googleLoaded && !isAuthenticated) {
+      window.google.accounts.id.renderButton(
+        document.getElementById('googleButton'),
+        {
+          theme: 'outline',
+          size: 'large',
+          width: 400,
+          text: 'continue_with',
+          locale: 'pt-BR'
+        }
+      );
+    }
+  }, [googleLoaded, isAuthenticated]);
+
+  // Processar resposta do Google
+  const handleGoogleResponse = (response) => {
+    try {
+      // Decodificar o JWT token
+      const payload = JSON.parse(atob(response.credential.split('.')[1]));
+      const email = payload.email;
+
+      // Verificar domínio
+      if (!email.endsWith(ALLOWED_DOMAIN)) {
+        setLoginError(`Apenas emails do domínio ${ALLOWED_DOMAIN} são permitidos`);
+        return;
+      }
+
+      // Login bem-sucedido
+      setIsAuthenticated(true);
+      setCurrentUser({
+        email: email,
+        name: payload.name || email.split('@')[0],
+        picture: payload.picture
+      });
+      setLoginError('');
+    } catch (error) {
+      setLoginError('Erro ao processar login do Google');
+      console.error('Erro no login:', error);
+    }
+  };
+
+  // Validar domínio do email
+  const isValidDomain = (email) => {
+    return email.endsWith(ALLOWED_DOMAIN);
+  };
+
+  // Login manual (email/senha)
+  const handleLogin = () => {
+    setLoginError('');
+
+    if (!loginData.email || !loginData.password) {
+      setLoginError('Por favor, preencha todos os campos');
+      return;
+    }
+
+    if (!isValidDomain(loginData.email)) {
+      setLoginError(`Apenas emails do domínio ${ALLOWED_DOMAIN} são permitidos`);
+      return;
+    }
+
+    // Aqui você implementaria a validação real com seu backend
+    // Por enquanto, aceita qualquer senha
+    setIsAuthenticated(true);
+    setCurrentUser({
+      email: loginData.email,
+      name: loginData.email.split('@')[0]
+    });
+    setLoginData({ email: '', password: '' });
+  };
+
+  // Logout
+  const handleLogout = () => {
+    if (window.google) {
+      window.google.accounts.id.disableAutoSelect();
+    }
+    setIsAuthenticated(false);
+    setCurrentUser(null);
+    setUploadedFile(null);
+    setFormData({
+      dataCompra: '',
+      fornecedor: '',
+      tipoDoc: 'NF',
+      numeroDoc: '',
+      valorDoc: '',
+      formaPagamento: 'Banco',
+      numeroCartao: '',
+      valorPago: '',
+      parcela: '',
+      totalParcelas: ''
+    });
+  };
+
+  const formatDate = (date) => {
+    if (!date) return '';
+    const [year, month, day] = date.split('-');
+    return `${day}${month}${year.slice(2)}`;
+  };
+
+  const formatValue = (value) => {
+    if (!value) return '';
+    return value.replace('.', ',');
+  };
+
+  const capitalizeWords = (text) => {
+    if (!text) return '';
+    return text
+      .toLowerCase()
+      .split(' ')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  };
+
+  const generateFileName = () => {
+    if (!formData.dataCompra || !formData.fornecedor) {
+      return 'Preencha data e fornecedor';
+    }
+
+    let fileName = `${formatDate(formData.dataCompra)}_${capitalizeWords(formData.fornecedor)}`;
+
+    if (formData.tipoDoc && formData.numeroDoc) {
+      fileName += `-${formData.tipoDoc}-${formData.numeroDoc}`;
+    }
+
+    if (formData.valorDoc && formData.valorDoc !== formData.valorPago) {
+      fileName += `-${formatValue(formData.valorDoc)}`;
+    }
+
+    if (formData.parcela && formData.totalParcelas) {
+      fileName += `-${formData.parcela}x${formData.totalParcelas}`;
+    }
+
+    if (formData.formaPagamento === 'CCredito' && formData.numeroCartao) {
+      fileName += `-CCredito-${formData.numeroCartao}`;
+    } else if (formData.formaPagamento === '$') {
+      fileName += `-$`;
+    }
+
+    if (formData.valorPago) {
+      fileName += `_${formatValue(formData.valorPago)}`;
+    }
+
+    return fileName;
+  };
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const handleLoginInputChange = (e) => {
+    const { name, value } = e.target;
+    setLoginData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (file && file.type === 'application/pdf') {
+      setUploadedFile(file);
+    } else {
+      alert('Por favor, selecione um arquivo PDF');
+      e.target.value = '';
+    }
+  };
+
+  const downloadRenamedFile = () => {
+    if (!uploadedFile) {
+      alert('Por favor, faça upload de um arquivo PDF primeiro');
+      return;
+    }
+
+    const fileName = generateFileName();
+    if (fileName === 'Preencha data e fornecedor') {
+      alert('Por favor, preencha pelo menos a data e o fornecedor');
+      return;
+    }
+
+    const newFileName = `${fileName}.pdf`;
+    const url = URL.createObjectURL(uploadedFile);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = newFileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    setTimeout(() => {
+      setUploadedFile(null);
+      setFormData({
+        dataCompra: '',
+        fornecedor: '',
+        tipoDoc: 'NF',
+        numeroDoc: '',
+        valorDoc: '',
+        formaPagamento: 'Banco',
+        numeroCartao: '',
+        valorPago: '',
+        parcela: '',
+        totalParcelas: ''
+      });
+      const fileInput = document.getElementById('fileInput');
+      if (fileInput) fileInput.value = '';
+    }, 500);
+  };
+
+  const removeFile = () => {
+    setUploadedFile(null);
+    const fileInput = document.getElementById('fileInput');
+    if (fileInput) fileInput.value = '';
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      handleLogin();
+    }
+  };
+
+  // Tela de Login
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-600 via-indigo-700 to-purple-800 flex items-center justify-center p-6">
+        <div className="w-full max-w-md">
+          <div className="bg-white rounded-2xl shadow-2xl p-8">
+            <div className="text-center mb-8">
+              <div className="bg-indigo-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4">
+                <FileText className="text-indigo-600" size={40} />
+              </div>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">
+                Renomeador de Arquivos AEI
+              </h1>
+              <p className="text-gray-600 text-sm">
+                Sistema de padronização de documentos
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Email
+                </label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+                  <input
+                    type="email"
+                    name="email"
+                    value={loginData.email}
+                    onChange={handleLoginInputChange}
+                    onKeyPress={handleKeyPress}
+                    placeholder="seu.nome@arautosdoevangelho.org.br"
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Senha
+                </label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+                  <input
+                    type="password"
+                    name="password"
+                    value={loginData.password}
+                    onChange={handleLoginInputChange}
+                    onKeyPress={handleKeyPress}
+                    placeholder="Digite sua senha"
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  />
+                </div>
+              </div>
+
+              {loginError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+                  {loginError}
+                </div>
+              )}
+
+              <button
+                onClick={handleLogin}
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-lg transition-colors"
+              >
+                Entrar
+              </button>
+            </div>
+
+            <div className="relative my-6">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-gray-300"></div>
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-2 bg-white text-gray-500">ou</span>
+              </div>
+            </div>
+
+            {/* Botão do Google será renderizado aqui */}
+            <div id="googleButton" className="flex justify-center"></div>
+
+            <div className="mt-6 text-center">
+              <p className="text-xs text-gray-500">
+                Apenas usuários com email @arautosdoevangelho.org.br podem acessar
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Tela Principal (após login)
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
+      <div className="max-w-4xl mx-auto">
+        <div className="bg-white rounded-xl shadow-lg p-4 mb-6 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            {currentUser?.picture ? (
+              <img 
+                src={currentUser.picture} 
+                alt={currentUser.name}
+                className="w-12 h-12 rounded-full"
+              />
+            ) : (
+              <div className="bg-indigo-100 w-12 h-12 rounded-full flex items-center justify-center">
+                <User className="text-indigo-600" size={24} />
+              </div>
+            )}
+            <div>
+              <p className="font-semibold text-gray-800">{currentUser?.name}</p>
+              <p className="text-sm text-gray-600">{currentUser?.email}</p>
+            </div>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
+          >
+            <LogOut size={18} />
+            Sair
+          </button>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+          <h1 className="text-3xl font-bold text-indigo-900 mb-2">
+            Renomeador de Arquivos AEI
+          </h1>
+          <p className="text-gray-600 mb-6">
+            Faça upload do PDF e preencha os dados para renomeá-lo conforme o diretório de procedimentos
+          </p>
+
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Upload do PDF *
+            </label>
+            <div className="flex items-center gap-4">
+              <label className="flex-1 cursor-pointer">
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 hover:border-indigo-500 transition-colors">
+                  <div className="flex flex-col items-center justify-center gap-2">
+                    <Upload className="text-indigo-600" size={32} />
+                    <span className="text-sm text-gray-600">
+                      {uploadedFile ? uploadedFile.name : 'Clique para selecionar um PDF'}
+                    </span>
+                    <span className="text-xs text-gray-400">
+                      Apenas arquivos PDF
+                    </span>
+                  </div>
+                </div>
+                <input
+                  id="fileInput"
+                  type="file"
+                  accept="application/pdf"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+              </label>
+              {uploadedFile && (
+                <button
+                  onClick={removeFile}
+                  className="text-red-600 hover:text-red-700 p-2"
+                  title="Remover arquivo"
+                >
+                  <Trash2 size={24} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-indigo-50 border-2 border-indigo-200 rounded-lg p-4 mb-6">
+            <p className="text-sm text-gray-600 mb-1">Novo nome do arquivo:</p>
+            <p className="text-lg font-mono font-semibold text-indigo-900 break-all">
+              {generateFileName()}.pdf
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Data da Compra/NF *
+              </label>
+              <input
+                type="date"
+                name="dataCompra"
+                value={formData.dataCompra}
+                onChange={handleInputChange}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Fornecedor *
+              </label>
+              <input
+                type="text"
+                name="fornecedor"
+                value={formData.fornecedor}
+                onChange={handleInputChange}
+                placeholder="Ex: Makro, Petro Nilo"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Tipo de Documento
+              </label>
+              <select
+                name="tipoDoc"
+                value={formData.tipoDoc}
+                onChange={handleInputChange}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              >
+                {tiposDocumento.map(tipo => (
+                  <option key={tipo.value} value={tipo.value}>
+                    {tipo.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Número do Documento
+              </label>
+              <input
+                type="text"
+                name="numeroDoc"
+                value={formData.numeroDoc}
+                onChange={handleInputChange}
+                placeholder="Ex: 1575"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Valor do Documento (R$)
+              </label>
+              <input
+                type="text"
+                name="valorDoc"
+                value={formData.valorDoc}
+                onChange={handleInputChange}
+                placeholder="Ex: 1000.00"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Forma de Pagamento
+              </label>
+              <select
+                name="formaPagamento"
+                value={formData.formaPagamento}
+                onChange={handleInputChange}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              >
+                {formasPagamento.map(forma => (
+                  <option key={forma.value} value={forma.value}>
+                    {forma.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {formData.formaPagamento === 'CCredito' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Número do Cartão (4 últimos dígitos)
+                </label>
+                <input
+                  type="text"
+                  name="numeroCartao"
+                  value={formData.numeroCartao}
+                  onChange={handleInputChange}
+                  placeholder="Ex: 0411"
+                  maxLength="4"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Valor Pago (R$) *
+              </label>
+              <input
+                type="text"
+                name="valorPago"
+                value={formData.valorPago}
+                onChange={handleInputChange}
+                placeholder="Ex: 970.00"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Parcela Atual
+                </label>
+                <select
+                  name="parcela"
+                  value={formData.parcela}
+                  onChange={handleInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                >
+                  <option value="">Selecione</option>
+                  {[...Array(24)].map((_, i) => (
+                    <option key={i + 1} value={i + 1}>
+                      {i + 1}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Total de Parcelas
+                </label>
+                <select
+                  name="totalParcelas"
+                  value={formData.totalParcelas}
+                  onChange={handleInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                >
+                  <option value="">Selecione</option>
+                  {[...Array(24)].map((_, i) => (
+                    <option key={i + 1} value={i + 1}>
+                      {i + 1}x
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <button
+            onClick={downloadRenamedFile}
+            disabled={!uploadedFile}
+            className={`w-full font-semibold py-3 rounded-lg transition-colors flex items-center justify-center gap-2 ${
+              uploadedFile
+                ? 'bg-green-600 hover:bg-green-700 text-white'
+                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+            }`}
+          >
+            <FileDown size={20} />
+            Baixar PDF Renomeado
+          </button>
+        </div>
+
+        <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-6">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="text-amber-600 mt-1 flex-shrink-0" size={24} />
+            <div>
+              <h3 className="font-bold text-amber-900 mb-2">Guia Rápido de Nomeação</h3>
+              <ul className="text-sm text-amber-800 space-y-1">
+                <li>• <strong>Banco:</strong> 010123_Makro-NF-23423_1000,00.pdf</li>
+                <li>• <strong>Cartão:</strong> 010123_Makro-NF-23423-CCredito-0411_1000,00.pdf</li>
+                <li>• <strong>Dinheiro:</strong> 010123_Makro-NF-23423-$_1000,00.pdf</li>
+                <li>• <strong>Parcelado:</strong> 010123_Makro-NF-23423-1x4_250,00.pdf</li>
+                <li>• <strong>Com desconto:</strong> 010123_Makro-NF-23423-1000,00_970,00.pdf</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
